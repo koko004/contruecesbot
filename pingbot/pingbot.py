@@ -2,13 +2,28 @@ import os
 import telebot
 import time
 import requests
+import csv
 
-with open("config.txt", "r") as f:
-    TOKEN = f.read().strip()
-
+TOKEN = "TOKEN"
 bot = telebot.TeleBot(TOKEN)
 
-servers = {}  # Diccionario para almacenar los servidores y los puertos correspondientes
+HOSTS_FILE = "hosts.csv"
+
+def read_hosts():
+    try:
+        with open(HOSTS_FILE, mode='r') as file:
+            reader = csv.reader(file)
+            return {rows[0]: rows[1] for rows in reader}
+    except FileNotFoundError:
+        return {}
+
+def write_hosts(hosts):
+    with open(HOSTS_FILE, mode='w') as file:
+        writer = csv.writer(file)
+        for server, port in hosts.items():
+            writer.writerow([server, port])
+
+servers = read_hosts()
 
 def check_server_status(server, port):
     url = f"http://{server}:{port}/"
@@ -36,25 +51,47 @@ def add_server(chat_id, server, port):
         message = "¡El servidor ya ha sido agregado anteriormente!"
     else:
         servers[server] = port
+        write_hosts(servers)
         message = "¡El servidor ha sido agregado correctamente!"
     return message
 
-def list_servers(chat_id):
+@bot.message_handler(commands=['list'])
+def list_servers(message):
+    chat_id = message.chat.id
     if not servers:
-        message = "¡No se han agregado servidores todavía!"
+        message_text = "¡No se han agregado servidores todavía!"
     else:
-        message = "Los siguientes servidores han sido agregados:\n"
+        message_text = "Los siguientes servidores han sido agregados:\n"
         for server, port in servers.items():
-            message += f"{server}:{port}\n"
-    return message
+            message_text += f"{server}:{port}\n"
+    bot.send_message(chat_id, message_text)
 
-def delete_server(chat_id, server):
-    if server in servers:
-        del servers[server]
-        message = "¡El servidor ha sido eliminado correctamente!"
+@bot.message_handler(commands=['delete'])
+def delete_server(message):
+    chat_id = message.chat.id
+    if not servers:
+        message_text = "¡No se han agregado servidores todavía!"
+        bot.send_message(chat_id, message_text)
+        return
+
+    message_text = "Por favor, selecciona el servidor que deseas eliminar:\n"
+    for server, port in servers.items():
+        message_text += f"{server}:{port}\n"
+    bot.send_message(chat_id, message_text)
+
+    bot.register_next_step_handler(message, delete_server_step)
+
+def delete_server_step(message):
+    chat_id = message.chat.id
+    server_to_delete = message.text
+
+    if server_to_delete in servers:
+        del servers[server_to_delete]
+        write_hosts(servers)
+        message_text = "¡El servidor ha sido eliminado correctamente!"
     else:
-        message = "¡El servidor no existe en la lista!"
-    return message
+        message_text = "¡El servidor no existe en la lista!"
+    bot.send_message(chat_id, message_text)
 
 @bot.message_handler(commands=['start', 'help'])
 def handle_start_help(message):
@@ -63,40 +100,6 @@ def handle_start_help(message):
 
 @bot.message_handler(commands=['add'])
 def handle_add(message):
-    chat_id = message.chat.id
-    message_text = "Por favor, introduce el nombre del servidor que deseas agregar:"
-    bot.send_message(chat_id, message_text)
-    bot.register_next_step_handler(message, add_server_step1)
-
-def add_server_step1(message):
-    chat_id = message.chat.id
-    server = message.text
-    message_text = "Por favor, introduce el número de puerto del servidor:"
-    bot.send_message(chat_id, message_text)
-    bot.register_next_step_handler(message, add_server_step2, server)
-
-def add_server_step2(message, server):
-    chat_id = message.chat.id
-    port = message.text
-    message_text = add_server(chat_id, server, port)
-    bot.send_message(chat_id, message_text)
-
-@bot.message_handler(commands=['list'])
-def handle_list(message):
-    chat_id = message.chat.id
-    message_text = list_servers(chat_id)
-    bot.send_message(chat_id, message_text)
-
-@bot.message_handler(commands=['delete'])
-def handle_delete(message):
-    chat_id = message.chat.id
-    message_text = "Por favor, introduce el nombre del servidor que deseas eliminar:"
-    bot.send_message(chat_id, message_text)
-    bot.register_next_step_handler(message, delete_server_step1)
-
-def delete_server_step1(message):
-    chat_id = message.chat.id
-    server = message.text
-    message_text = delete_server(chat_id, server)
+    chat_id = message.chat
 
 bot.infinity_polling()
